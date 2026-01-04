@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import useKeyboard from "../hooks/useKeyboard";
-import { TILE_IMAGES, TileType, useGameStore } from "../store/gameStore";
+import { OBJECT_SPRITES, ObjectType, TILE_IMAGES, TileType, useGameStore } from "../store/gameStore";
 
-const TILE_SIZE = 64;
+export const TILE_SIZE = 64;
 const PLAYER_SIZE = 64;
 const PLAYER_SPEED = 4; // Pixels per frame
 const SPRINT_SPEED = 6;
@@ -19,7 +19,8 @@ export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keysPressed = useKeyboard();
   const worldMap = useGameStore((state) => state.worldMap);
-
+  const objects = useGameStore((state) => state.objects);
+  const objectSpriteSheetRef = useRef<HTMLImageElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
 
   const tileImagesRef = useRef<Record<TileType, HTMLImageElement>>({} as any);
@@ -60,8 +61,21 @@ export default function GameCanvas() {
         };
         img.onerror = reject;
       });
+
+      const objectSheetPromise = new Promise<void>((resolve, reject) => {
+        const img = new Image();
+        img.src = '/assets/objects/objects.png';
+        img.onload = () => {
+          objectSpriteSheetRef.current = img;
+          resolve();
+        };
+        img.onerror = reject;
+      });
+
+
+
       try {
-        await Promise.all([...imagePromises, playerPromise]);
+        await Promise.all([...imagePromises, playerPromise, objectSheetPromise]);
         setImagesLoaded(true);
         console.log("All tile images loaded!");
       } catch (error) {
@@ -99,7 +113,7 @@ export default function GameCanvas() {
     const WORLD_WIDTH = worldMap[0].length * TILE_SIZE;
     const WORLD_HEIGHT = worldMap.length * TILE_SIZE;
 
-    const checkCollision = (x: number, y: number) => {
+    const checkTileCollision = (x: number, y: number) => {
       // Player visual size is 48x48, but hitbox should be smaller
       // Based on your sprite, the body looks like it's:
       // - Starts about 24px down from top (skip the hair)
@@ -135,6 +149,47 @@ export default function GameCanvas() {
         }
       }
       return false;
+    };
+
+    const checkObjectCollision = (x: number, y: number) => {
+      const hitboxOffsetX = 8;
+      const hitboxOffsetY = 24;
+      const hitboxWidth = 32;
+      const hitboxHeight = 24;
+
+      const playerBounds = {
+        x: x + hitboxOffsetX,
+        y: y + hitboxOffsetY,
+        width: hitboxWidth,
+        height: hitboxHeight,
+      };
+
+      for (const obj of objects) {
+        if (!obj.solid) continue;
+
+        // Simple bounding box collision
+        const objBounds = {
+          x: obj.x,
+          y: obj.y,
+          width: TILE_SIZE,
+          height: TILE_SIZE,
+        };
+
+        if (
+          playerBounds.x < objBounds.x + objBounds.width &&
+          playerBounds.x + playerBounds.width > objBounds.x &&
+          playerBounds.y < objBounds.y + objBounds.height &&
+          playerBounds.y + playerBounds.height > objBounds.y
+        ) {
+          return true;
+        }
+      }
+
+      return false;
+    };
+
+    const checkCollision = (x: number, y: number) => {
+      return checkTileCollision(x, y) || checkObjectCollision(x, y);
     };
 
     let animationFrameId: number;
@@ -208,16 +263,13 @@ export default function GameCanvas() {
       playerPosition.y = newY;
 
       if (checkCollision(playerPosition.x, playerPosition.y)) {
-        // Diagonal movement failed, try just X
         playerPosition.y = oldY;
-
+        
         if (checkCollision(playerPosition.x, playerPosition.y)) {
-          // X movement also failed, revert X and try just Y
           playerPosition.x = oldX;
           playerPosition.y = newY;
-
+          
           if (checkCollision(playerPosition.x, playerPosition.y)) {
-            // Both failed, revert everything
             playerPosition.y = oldY;
           }
         }
@@ -269,15 +321,15 @@ export default function GameCanvas() {
               sourceSize = 32;
             }
             if (tile === TileType.STONE) {
-              sourceX = 0;
-              sourceY = 64;
-              sourceSize = 30;
+              sourceX = 68;
+              sourceY = 2;
+              sourceSize = 24;
             }
 
             if (tile === TileType.DIRT) {
-              sourceX = 0;
-              sourceY = 0;
-              sourceSize = 16;
+              sourceX = 3;
+              sourceY = 3;
+              sourceSize = 42;
             }
 
             ctx.drawImage(
@@ -297,6 +349,8 @@ export default function GameCanvas() {
           // ctx.strokeRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
         }
       }
+
+      
 
       const playerPositionX = playerPosition.x - camera.x;
       const playerPositionY = playerPosition.y - camera.y;
@@ -346,6 +400,60 @@ export default function GameCanvas() {
         );
       }
 
+      if (objectSpriteSheetRef.current) {
+        for (const obj of objects) {
+          const screenX = obj.x - camera.x;
+          const screenY = obj.y - camera.y;
+
+          // Only draw if visible
+          if (
+            screenX + TILE_SIZE < 0 ||
+            screenX > canvasSize.width ||
+            screenY + TILE_SIZE < 0 ||
+            screenY > canvasSize.height
+          ) {
+            continue;
+          }
+
+          const sprite = OBJECT_SPRITES[obj.type];
+          let objectSize = TILE_SIZE;
+          let objectOffsetX = 0;
+          let objectOffsetY = 0;
+          if(obj.type === ObjectType.TREE){
+            objectSize = 192;
+            objectOffsetX = -objectSize/2 + 32;
+            objectOffsetY = -objectSize/2 - 40;
+          }
+          if(obj.type === ObjectType.ROCK){
+            objectSize = 0;
+            objectOffsetX = -objectSize/2 +16;
+            objectOffsetY = -objectSize/2 + 16;
+          }
+          if(obj.type === ObjectType.BUSH){
+            objectSize = 0;
+            objectOffsetX = -objectSize/2;
+            objectOffsetY = -objectSize/2;
+          }
+          if(obj.type === ObjectType.CROP){
+            objectSize = 0;
+            objectOffsetX = -objectSize/2;
+            objectOffsetY = -objectSize/2;
+          }
+          if(obj.type === ObjectType.FENCE){
+            objectSize = 0;
+            objectOffsetX = -objectSize/2;
+            objectOffsetY = -objectSize/2;
+          }
+          if(obj.type === ObjectType.TREE){
+            ctx.drawImage(
+              objectSpriteSheetRef.current,
+              sprite.x, sprite.y, sprite.width, sprite.height, // Source from sheet
+              screenX+objectOffsetX, screenY+objectOffsetY, objectSize, objectSize // Draw at tile size
+            );
+          }
+          
+        }
+      }
       animationFrameId = requestAnimationFrame(gameLoop);
     };
 
@@ -355,7 +463,7 @@ export default function GameCanvas() {
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [worldMap, canvasSize, keysPressed, imagesLoaded]);
+  }, [worldMap, canvasSize, keysPressed, imagesLoaded, objects]);
   // Show loading message while images load
   if (!imagesLoaded) {
     return (

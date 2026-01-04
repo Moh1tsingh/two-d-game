@@ -8,15 +8,72 @@ export enum TileType {
   STONE = 3,
 }
 
+const TILE_SIZE = 64
+
+export enum ObjectType {
+  TREE = "tree",
+  ROCK = "rock",
+  BUSH = "bush",
+  FENCE = "fence",
+  CROP = "crop",
+}
+
+export interface GameObject {
+  id: string;
+  type: ObjectType;
+  x: number;
+  y: number;
+  solid: boolean;
+  growthStage?: number;
+}
+
+// Object sprite coordinates from the sprite sheet
+export interface SpriteData {
+  sheet: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export const OBJECT_SPRITES: Record<ObjectType, SpriteData> = {
+  [ObjectType.TREE]: { 
+    sheet: '/assets/objects/objects.png', 
+    x: 220, y: 0, // Top-left area, row 3 (0-indexed)
+    width: 96, height: 96 
+  },
+  [ObjectType.ROCK]: { 
+    sheet: '/assets/objects/objects.png', 
+    x: 0, y: 112, // Medium rock
+    width: 48, height: 32 
+  },
+  [ObjectType.BUSH]: { 
+    sheet: '/assets/objects/objects.png', 
+    x: 0, y: 96, // Small green bush bottom-left
+    width: 16, height: 16 
+  },
+  [ObjectType.CROP]: { 
+    sheet: '/assets/objects/objects.png', 
+    x: 96, y: 128, // Yellow bush as crop
+    width: 32, height: 32 
+  },
+  [ObjectType.FENCE]: { 
+    sheet: '/assets/objects/objects.png', 
+    x: 96, y: 192, // Placeholder
+    width: 16, height: 16 
+  },
+};
 export const TILE_IMAGES = {
   [TileType.GRASS]: "/assets/grass2.png",
-  [TileType.DIRT]: "/assets/dirt.png",
-  [TileType.STONE]: "/assets/rock.png",
+  [TileType.DIRT]: "/assets/sand.png",
+  // [TileType.DIRT]: "/assets/dirt.png",
+  [TileType.STONE]: "/assets/GrassTile.png",
   [TileType.WATER]: "/assets/water.png",
 };
 
 interface GameState {
   worldMap: TileType[][];
+  objects: GameObject[];
   generateWorld: (width: number, height: number) => void;
 }
 
@@ -94,11 +151,59 @@ const generateRealisticWorld = (
   return map;
 };
 
-export const useGameStore = create<GameState>((set) => ({
-  worldMap: generateRealisticWorld(
-    WORLD_SIZE_TILE_WIDTH,
-    WORLD_SIZE_TILE_HEIGHT
-  ), //25x19 for 800x600  for Bigger world kind of infinite wala scene -> 50x50
-  generateWorld: (width, height) =>
-    set({ worldMap: generateRealisticWorld(width, height) }),
-}));
+const generateGameObjects = (
+  worldMap: TileType[][],
+  tileSize: number
+): GameObject[] => {
+  const objects: GameObject[] = [];
+  let width = worldMap.length;
+  let height = worldMap[0].length;
+
+  const treeNoise = createNoise2D();
+
+  let objectId = 0;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const tile = worldMap[y][x];
+      // Trees on grass (forests)
+      if (tile === TileType.GRASS) {
+        const treeChance = treeNoise(x * 0.2, y * 0.2);
+        if (treeChance > 0.6 && treeChance < 0.65) {
+          objects.push({
+            id: `obj_${objectId++}`,
+            type: ObjectType.TREE,
+            x: x * tileSize,
+            y: y * tileSize,
+            solid: true,
+          });
+        }
+      }
+    }
+  }
+
+  return objects;
+};
+
+export const useGameStore = create<GameState>((set) => {
+  const worldMap = generateRealisticWorld(150, 150);
+  const objects = generateGameObjects(worldMap, TILE_SIZE);
+
+  return {
+    worldMap,
+    objects,
+    generateWorld(width, height) {
+      const newMap = generateRealisticWorld(width, height);
+      const newObjects = generateGameObjects(worldMap, TILE_SIZE);
+      set({ worldMap: newMap, objects: newObjects });
+    },
+    addObjects: (obj: GameObject) =>
+      set((state) => ({
+        objects: [...state.objects, obj],
+      })),
+    removeObjets: (id: string) =>
+      set((state) => ({
+        objects: state.objects.filter((object: GameObject) => object.id !== id),
+      })),
+  };
+});
